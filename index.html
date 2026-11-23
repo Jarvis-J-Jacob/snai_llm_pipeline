@@ -383,6 +383,35 @@
       padding: 2px 8px;
       border-radius: 4px;
     }
+
+    /* Custom Sentence / Stage 7 Card */
+    .custom-section-box {
+      margin-top: 32px;
+      border-top: 2px dashed #e2e8f0;
+      padding-top: 24px;
+    }
+
+    .custom-results-box {
+      display: none;
+      margin-top: 20px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .vector-preview-box {
+      background: #ffffff;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 0.88rem;
+      color: #0f172a;
+      border: 1px solid #cbd5e1;
+      word-break: break-all;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
   </style>
 </head>
 
@@ -410,7 +439,6 @@ Learning how language models work is fun.</textarea>
 
       <!-- Vocabulary display container (slider + scrollable table + size) -->
       <div class="vocab-container" id="vocab-display">
-        <!-- Slider to control top N words kept -->
         <div class="slider-container">
           <div class="slider-header">
             <span>Words kept: <span class="slider-badge" id="slider-count-label">0 of 0</span></span>
@@ -442,7 +470,6 @@ Learning how language models work is fun.</textarea>
 
       <!-- Tokenize Results Container -->
       <div class="tokenize-container" id="tokenize-display">
-        <!-- Stats: characters, tokens, characters per token -->
         <div class="stats-grid">
           <div class="stat-card">
             <span class="stat-label">Characters</span>
@@ -458,11 +485,9 @@ Learning how language models work is fun.</textarea>
           </div>
         </div>
 
-        <!-- Token chips -->
         <label>Token chips (word on top, ID below):</label>
         <div class="token-chips-wrapper" id="token-chips"></div>
 
-        <!-- Notice if unknown words were broken down -->
         <div class="subword-note" id="subword-note">
           Notice: unknown words are broken into smaller pieces.
         </div>
@@ -528,6 +553,38 @@ Share prices fell sharply.</textarea>
           </table>
         </div>
       </div>
+
+      <!-- Stage 7: Custom Word or Sentence Section -->
+      <div class="custom-section-box" id="custom-sentence-section">
+        <div class="form-group">
+          <label for="custom-sentence-input">Try your own word or sentence</label>
+          <input type="text" id="custom-sentence-input" value="A playful kitten rested on the rug." />
+        </div>
+
+        <button class="btn" id="btn-custom-embed" type="button">Tokenize, embed & add to plot</button>
+
+        <div class="custom-results-box" id="custom-results-container">
+          <label style="margin-bottom: 6px;">1. Token chips:</label>
+          <div class="token-chips-wrapper" id="custom-token-chips" style="margin-top: 4px; margin-bottom: 16px;"></div>
+
+          <label style="margin-bottom: 6px;">2. Vector preview (first 8 numbers):</label>
+          <div class="vector-preview-box" id="custom-vector-preview"></div>
+
+          <label style="margin-bottom: 8px;">3. 3 Closest sentences in the plot:</label>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 60px;">Rank</th>
+                  <th>Sentence</th>
+                  <th style="width: 120px; text-align: right;">Similarity</th>
+                </tr>
+              </thead>
+              <tbody id="custom-closest-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -545,12 +602,78 @@ Share prices fell sharply.</textarea>
     // WHAT THIS DOES: Generates a consistent, readable pastel background colour based on the token ID so the same word always gets the exact same colour.
     function getColorForId(id) {
       if (id === 0) {
-        // Soft peach colour for unknown tokens (ID 0)
-        return "#fed7aa";
+        return "#fed7aa"; // Soft peach colour for unknown tokens (ID 0)
       }
-      // Use the golden angle formula to give nicely distributed distinct hues for each ID
       const hue = (id * 137.5) % 360;
       return "hsl(" + hue + ", 75%, 85%)";
+    }
+
+    // WHAT THIS DOES: Breaks any given text into word tokens, checks active vocabulary, splits unknown words into character pieces with ##, and returns the tokens and stats.
+    function getSentenceTokens(rawSentence) {
+      if (vocabulary.length === 0) {
+        buildVocabulary();
+      }
+
+      let cleaned = rawSentence.toLowerCase();
+      cleaned = cleaned.replace(/([.,!?'’])/g, " $1 ");
+
+      const rawWords = cleaned.trim().split(/\s+/).filter(function (w) {
+        return w.length > 0;
+      });
+
+      const tokens = [];
+      let hadUnknownWord = false;
+
+      for (let i = 0; i < rawWords.length; i++) {
+        const word = rawWords[i];
+        if (vocabMap.hasOwnProperty(word)) {
+          tokens.push({
+            word: word,
+            id: vocabMap[word]
+          });
+        } else {
+          hadUnknownWord = true;
+          for (let c = 0; c < word.length; c++) {
+            const piece = (c === 0) ? word[c] : ("##" + word[c]);
+            const pieceId = vocabMap.hasOwnProperty(piece) ? vocabMap[piece] : 0;
+            tokens.push({
+              word: piece,
+              id: pieceId
+            });
+          }
+        }
+      }
+
+      return {
+        tokens: tokens,
+        hadUnknownWord: hadUnknownWord,
+        numCharacters: rawSentence.length,
+        numTokens: tokens.length,
+        charsPerToken: tokens.length > 0 ? (rawSentence.length / tokens.length).toFixed(2) : "0.00"
+      };
+    }
+
+    // WHAT THIS DOES: Renders token chips into any container element on the page, displaying the word on top and the ID below.
+    function renderChipsInto(containerElement, tokens) {
+      containerElement.innerHTML = "";
+      for (let i = 0; i < tokens.length; i++) {
+        const t = tokens[i];
+        const chip = document.createElement("div");
+        chip.className = "token-chip";
+        chip.style.backgroundColor = getColorForId(t.id);
+
+        const wordSpan = document.createElement("span");
+        wordSpan.className = "chip-word";
+        wordSpan.textContent = t.word;
+
+        const idSpan = document.createElement("span");
+        idSpan.className = "chip-id";
+        idSpan.textContent = "ID " + t.id;
+
+        chip.appendChild(wordSpan);
+        chip.appendChild(idSpan);
+        containerElement.appendChild(chip);
+      }
     }
 
     // WHAT THIS DOES: Updates the active vocabulary to only keep the top N words, rebuilds the table, and live re-tokenizes if needed.
@@ -558,10 +681,8 @@ Share prices fell sharply.</textarea>
       const totalWords = fullSortedWords.length;
       if (totalWords === 0) return;
 
-      // Keep N within valid bounds [1, totalWords]
       const n = Math.max(1, Math.min(keptCount, totalWords));
 
-      // Rebuild the active vocabulary with [UNK] (ID 0) followed by the top N words
       vocabulary = [
         { id: 0, token: "[UNK]", count: "-" }
       ];
@@ -580,15 +701,12 @@ Share prices fell sharply.</textarea>
         vocabMap[word] = newId;
       }
 
-      // Update the slider badge text (e.g. "Words kept: N of TOTAL")
       const countLabel = document.getElementById("slider-count-label");
       countLabel.textContent = n + " of " + totalWords;
 
-      // Update the summary text
       const sizeText = document.getElementById("vocab-size-text");
       sizeText.textContent = "Vocabulary size: " + vocabulary.length + " tokens (including [UNK])";
 
-      // Refresh table rows with currently kept words
       const tableBody = document.getElementById("vocab-table-body");
       tableBody.innerHTML = "";
 
@@ -614,7 +732,6 @@ Share prices fell sharply.</textarea>
         tableBody.appendChild(row);
       }
 
-      // If a sentence was already tokenized, re-tokenize it live as the slider moves
       if (hasTokenized) {
         tokenizeSentence();
       }
@@ -624,25 +741,19 @@ Share prices fell sharply.</textarea>
     function buildVocabulary() {
       const rawText = document.getElementById("training-sentences").value;
 
-      // Step 1: Make all text lowercase
       let text = rawText.toLowerCase();
-
-      // Step 2: Put spaces around . , ! ? ' so each becomes its own token
       text = text.replace(/([.,!?'’])/g, " $1 ");
 
-      // Step 3: Split the text into words on spaces
       const words = text.trim().split(/\s+/).filter(function (word) {
         return word.length > 0;
       });
 
-      // Step 4: Count how many times each word appears; sort most frequent first
       fullWordCounts = {};
       for (let i = 0; i < words.length; i++) {
         const word = words[i];
         fullWordCounts[word] = (fullWordCounts[word] || 0) + 1;
       }
 
-      // Sort words by count (highest first). If counts are equal, sort alphabetically
       fullSortedWords = Object.keys(fullWordCounts).sort(function (a, b) {
         if (fullWordCounts[b] !== fullWordCounts[a]) {
           return fullWordCounts[b] - fullWordCounts[a];
@@ -651,111 +762,31 @@ Share prices fell sharply.</textarea>
       });
 
       const totalWords = fullSortedWords.length;
-
-      // Configure the slider range and default value to totalWords
       const slider = document.getElementById("vocab-slider");
       slider.min = "1";
       slider.max = totalWords.toString();
       slider.value = totalWords.toString();
 
-      // Make the vocabulary section visible
       document.getElementById("vocab-display").style.display = "block";
-
-      // Apply initial full vocabulary view
       applyVocabularyFilter(totalWords);
     }
 
-    // WHAT THIS DOES: Splits a sentence into tokens, handles unknown words by breaking them into smaller character pieces, displays coloured chips, and calculates statistics.
+    // WHAT THIS DOES: Tokenizes the input sentence in Part 1 and renders its statistics, chips, and subword notes.
     function tokenizeSentence() {
-      // If vocabulary has not been built yet, build it automatically first
-      if (vocabulary.length === 0) {
-        buildVocabulary();
-      }
-
       hasTokenized = true;
 
       const inputElement = document.getElementById("encode-sentence");
-      const rawSentence = inputElement.value;
+      const result = getSentenceTokens(inputElement.value);
 
-      // Clean the sentence: lowercase and separate punctuation
-      let cleaned = rawSentence.toLowerCase();
-      cleaned = cleaned.replace(/([.,!?'’])/g, " $1 ");
+      document.getElementById("stat-chars").textContent = result.numCharacters;
+      document.getElementById("stat-tokens").textContent = result.numTokens;
+      document.getElementById("stat-chars-per-token").textContent = result.charsPerToken;
 
-      // Split into words on spaces
-      const rawWords = cleaned.trim().split(/\s+/).filter(function (w) {
-        return w.length > 0;
-      });
+      renderChipsInto(document.getElementById("token-chips"), result.tokens);
 
-      const tokens = [];
-      let hadUnknownWord = false;
-
-      // Process each word
-      for (let i = 0; i < rawWords.length; i++) {
-        const word = rawWords[i];
-
-        // Check if the whole word exists in our active vocabulary
-        if (vocabMap.hasOwnProperty(word)) {
-          tokens.push({
-            word: word,
-            id: vocabMap[word]
-          });
-        } else {
-          // Word is not in active vocabulary: split into single letters
-          hadUnknownWord = true;
-          for (let c = 0; c < word.length; c++) {
-            const piece = (c === 0) ? word[c] : ("##" + word[c]);
-            const pieceId = vocabMap.hasOwnProperty(piece) ? vocabMap[piece] : 0;
-            tokens.push({
-              word: piece,
-              id: pieceId
-            });
-          }
-        }
-      }
-
-      // Compute statistics: characters, tokens, characters per token
-      const numCharacters = rawSentence.length;
-      const numTokens = tokens.length;
-      const charsPerToken = numTokens > 0 ? (numCharacters / numTokens).toFixed(2) : "0.00";
-
-      // Update statistics in the UI
-      document.getElementById("stat-chars").textContent = numCharacters;
-      document.getElementById("stat-tokens").textContent = numTokens;
-      document.getElementById("stat-chars-per-token").textContent = charsPerToken;
-
-      // Render coloured token chips
-      const chipsContainer = document.getElementById("token-chips");
-      chipsContainer.innerHTML = "";
-
-      for (let i = 0; i < tokens.length; i++) {
-        const t = tokens[i];
-        const chip = document.createElement("div");
-        chip.className = "token-chip";
-        chip.style.backgroundColor = getColorForId(t.id);
-
-        const wordSpan = document.createElement("span");
-        wordSpan.className = "chip-word";
-        wordSpan.textContent = t.word;
-
-        const idSpan = document.createElement("span");
-        idSpan.className = "chip-id";
-        idSpan.textContent = "ID " + t.id;
-
-        chip.appendChild(wordSpan);
-        chip.appendChild(idSpan);
-        chipsContainer.appendChild(chip);
-      }
-
-      // Show or hide the unknown word subword note
       const noteElement = document.getElementById("subword-note");
-      if (hadUnknownWord) {
-        noteElement.textContent = "Notice: unknown words are broken into smaller pieces.";
-        noteElement.style.display = "block";
-      } else {
-        noteElement.style.display = "none";
-      }
+      noteElement.style.display = result.hadUnknownWord ? "block" : "none";
 
-      // Make tokenize results section visible
       document.getElementById("tokenize-display").style.display = "block";
     }
 
@@ -784,7 +815,6 @@ Share prices fell sharply.</textarea>
         }
       }
 
-      // Scale vector so its length is 1
       let sumOfSquares = 0;
       for (let i = 0; i < 64; i++) {
         sumOfSquares += vector[i] * vector[i];
@@ -806,7 +836,6 @@ Share prices fell sharply.</textarea>
       if (numItems === 0) return [];
       const numDims = vectors[0].length;
 
-      // 1. Calculate the average value for each dimension
       const mean = new Array(numDims).fill(0);
       for (let i = 0; i < numItems; i++) {
         for (let d = 0; d < numDims; d++) {
@@ -814,7 +843,6 @@ Share prices fell sharply.</textarea>
         }
       }
 
-      // 2. Center each vector by subtracting the average value
       const centered = [];
       for (let i = 0; i < numItems; i++) {
         centered.push(new Array(numDims));
@@ -823,7 +851,6 @@ Share prices fell sharply.</textarea>
         }
       }
 
-      // 3. Find the top 3 principal directions of variation using power iteration
       const coords3D = [];
       for (let i = 0; i < numItems; i++) {
         coords3D.push([0, 0, 0]);
@@ -896,6 +923,24 @@ Share prices fell sharply.</textarea>
       return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
     }
 
+    // WHAT THIS DOES: Computes embedding vectors for an array of sentences using either the AI pipeline or spelling math.
+    async function computeSentenceVectors(sentences, embeddingMode) {
+      if (embeddingMode === "meaning" && meaningPipeline) {
+        const vectors = [];
+        for (let i = 0; i < sentences.length; i++) {
+          const output = await meaningPipeline(sentences[i], { pooling: "mean", normalize: true });
+          vectors.push(Array.from(output.data));
+        }
+        return vectors;
+      }
+
+      const vectors = [];
+      for (let i = 0; i < sentences.length; i++) {
+        vectors.push(createSpellingEmbedding(sentences[i]));
+      }
+      return vectors;
+    }
+
     // WHAT THIS DOES: Finds the 5 most similar sentence pairs and displays them in a neat table under the chart.
     function displayClosestPairs(sentences, vectors) {
       const pairs = [];
@@ -911,14 +956,11 @@ Share prices fell sharply.</textarea>
         }
       }
 
-      // Sort descending by cosine similarity score
       pairs.sort(function (a, b) {
         return b.score - a.score;
       });
 
-      // Take the top 5 closest pairs
       const top5 = pairs.slice(0, 5);
-
       const tableBody = document.getElementById("closest-pairs-body");
       tableBody.innerHTML = "";
 
@@ -952,8 +994,8 @@ Share prices fell sharply.</textarea>
       document.getElementById("closest-pairs-section").style.display = "block";
     }
 
-    // WHAT THIS DOES: Renders the 3D scatter chart inside the chart container with centered perspective and responsive sizing.
-    function render3DChart(sentences, points3D) {
+    // WHAT THIS DOES: Renders the 3D scatter chart inside the chart container, allowing one dot to be drawn bigger and orange.
+    function render3DChart(sentences, points3D, highlightedIndex) {
       const chartArea = document.getElementById("chart-area");
       chartArea.innerHTML = "";
 
@@ -961,6 +1003,8 @@ Share prices fell sharply.</textarea>
       const xVals = [];
       const yVals = [];
       const zVals = [];
+      const markerColors = [];
+      const markerSizes = [];
 
       for (let i = 0; i < sentences.length; i++) {
         const words = sentences[i].split(/\s+/);
@@ -970,6 +1014,15 @@ Share prices fell sharply.</textarea>
         xVals.push(points3D[i][0]);
         yVals.push(points3D[i][1]);
         zVals.push(points3D[i][2]);
+
+        // Draw the custom added sentence as a bigger orange dot
+        if (i === highlightedIndex) {
+          markerColors.push("#ea580c"); // bright orange
+          markerSizes.push(12); // bigger size
+        } else {
+          markerColors.push("#2563eb"); // standard blue
+          markerSizes.push(6);
+        }
       }
 
       const trace = {
@@ -987,8 +1040,8 @@ Share prices fell sharply.</textarea>
           color: "#1e293b"
         },
         marker: {
-          size: 6,
-          color: "#2563eb",
+          size: markerSizes,
+          color: markerColors,
           opacity: 0.9
         }
       };
@@ -1020,88 +1073,13 @@ Share prices fell sharply.</textarea>
       });
     }
 
-    // WHAT THIS DOES: Generates spelling-based vectors, reduces to 3D, and displays both the 3D plot and closest pairs table.
-    function runSpellingEmbedding(sentences) {
-      const vectors = [];
-      for (let i = 0; i < sentences.length; i++) {
-        vectors.push(createSpellingEmbedding(sentences[i]));
-      }
-
-      const points3D = reduceTo3D(vectors);
-      render3DChart(sentences, points3D);
-      displayClosestPairs(sentences, vectors);
-    }
-
-    // WHAT THIS DOES: Handles downloading the Xenova/all-MiniLM-L6-v2 model using transformers.js, extracting meaning-based embeddings, and automatically falling back to spelling if unavailable.
-    async function runMeaningEmbedding(sentences) {
-      const progressEl = document.getElementById("model-progress");
-      const fallbackEl = document.getElementById("fallback-notice");
-      const embedButton = document.getElementById("btn-embed-plot");
-
-      fallbackEl.style.display = "none";
-      progressEl.style.display = "block";
-      progressEl.textContent = "Loading transformers.js library...";
-      embedButton.disabled = true;
-
-      try {
-        const transformers = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
-
-        if (transformers.env) {
-          transformers.env.allowLocalModels = false;
-        }
-
-        if (!meaningPipeline) {
-          progressEl.textContent = "Connecting to download Xenova/all-MiniLM-L6-v2...";
-          meaningPipeline = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
-            progress_callback: function (data) {
-              if (data.status === "progress" && data.total) {
-                const pct = Math.round((data.loaded / data.total) * 100);
-                progressEl.textContent = "Downloading model (" + (data.file || "weights") + "): " + pct + "%";
-              } else if (data.status === "initiate") {
-                progressEl.textContent = "Starting download for " + (data.file || "model files") + "...";
-              } else if (data.status === "ready") {
-                progressEl.textContent = "Model loaded successfully!";
-              }
-            }
-          });
-        }
-
-        progressEl.textContent = "Computing meaning embeddings...";
-
-        const vectors = [];
-        for (let i = 0; i < sentences.length; i++) {
-          progressEl.textContent = "Embedding sentence " + (i + 1) + " of " + sentences.length + "...";
-          const output = await meaningPipeline(sentences[i], { pooling: "mean", normalize: true });
-          vectors.push(Array.from(output.data));
-        }
-
-        progressEl.textContent = "Done! Rendering 3D chart...";
-        setTimeout(function () {
-          progressEl.style.display = "none";
-        }, 1200);
-
-        const points3D = reduceTo3D(vectors);
-        render3DChart(sentences, points3D);
-        displayClosestPairs(sentences, vectors);
-
-      } catch (err) {
-        console.warn("Meaning mode encountered an error:", err);
-        progressEl.style.display = "none";
-
-        fallbackEl.textContent = "Meaning mode needs the page served over http - using spelling-based instead";
-        fallbackEl.style.display = "block";
-
-        runSpellingEmbedding(sentences);
-      } finally {
-        embedButton.disabled = false;
-      }
-    }
-
     // WHAT THIS DOES: Coordinates embedding and plotting when the "Embed and plot" button is clicked.
-    function handleEmbedAndPlot() {
+    async function handleEmbedAndPlot() {
       const textarea = document.getElementById("embedding-sentences");
       const chartArea = document.getElementById("chart-area");
       const fallbackEl = document.getElementById("fallback-notice");
+      const progressEl = document.getElementById("model-progress");
+      const embedButton = document.getElementById("btn-embed-plot");
 
       fallbackEl.style.display = "none";
 
@@ -1119,10 +1097,141 @@ Share prices fell sharply.</textarea>
       const selectedType = document.querySelector('input[name="embedding-type"]:checked').value;
 
       if (selectedType === "meaning") {
-        runMeaningEmbedding(sentences);
+        progressEl.style.display = "block";
+        progressEl.textContent = "Loading transformers.js library...";
+        embedButton.disabled = true;
+
+        try {
+          const transformers = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
+          if (transformers.env) transformers.env.allowLocalModels = false;
+
+          if (!meaningPipeline) {
+            progressEl.textContent = "Connecting to download Xenova/all-MiniLM-L6-v2...";
+            meaningPipeline = await transformers.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+              progress_callback: function (data) {
+                if (data.status === "progress" && data.total) {
+                  const pct = Math.round((data.loaded / data.total) * 100);
+                  progressEl.textContent = "Downloading model (" + (data.file || "weights") + "): " + pct + "%";
+                }
+              }
+            });
+          }
+
+          progressEl.textContent = "Computing meaning embeddings...";
+          const vectors = await computeSentenceVectors(sentences, "meaning");
+          progressEl.style.display = "none";
+
+          const points3D = reduceTo3D(vectors);
+          render3DChart(sentences, points3D, -1);
+          displayClosestPairs(sentences, vectors);
+
+        } catch (err) {
+          console.warn("Meaning mode encountered an error:", err);
+          progressEl.style.display = "none";
+          fallbackEl.textContent = "Meaning mode needs the page served over http - using spelling-based instead";
+          fallbackEl.style.display = "block";
+
+          const vectors = await computeSentenceVectors(sentences, "spelling");
+          const points3D = reduceTo3D(vectors);
+          render3DChart(sentences, points3D, -1);
+          displayClosestPairs(sentences, vectors);
+        } finally {
+          embedButton.disabled = false;
+        }
       } else {
-        runSpellingEmbedding(sentences);
+        const vectors = await computeSentenceVectors(sentences, "spelling");
+        const points3D = reduceTo3D(vectors);
+        render3DChart(sentences, points3D, -1);
+        displayClosestPairs(sentences, vectors);
       }
+    }
+
+    // WHAT THIS DOES: Handles tokenizing, embedding, appending to sentence list, plotting with a bigger orange dot, showing first 8 numbers, and finding 3 closest sentences.
+    async function handleCustomSentence() {
+      const customInput = document.getElementById("custom-sentence-input");
+      const customText = customInput.value.trim();
+      if (!customText) return;
+
+      // 1. Show its token chips reusing getSentenceTokens and renderChipsInto
+      const tokenResult = getSentenceTokens(customText);
+      renderChipsInto(document.getElementById("custom-token-chips"), tokenResult.tokens);
+
+      // 2. Add it to the sentence list (textarea) if not already present
+      const textarea = document.getElementById("embedding-sentences");
+      let sentences = textarea.value
+        .split("\n")
+        .map(function (s) { return s.trim(); })
+        .filter(function (s) { return s.length > 0; });
+
+      // Add to list and update textarea
+      sentences.push(customText);
+      textarea.value = sentences.join("\n");
+
+      // Determine active embedding mode
+      const selectedType = document.querySelector('input[name="embedding-type"]:checked').value;
+      const effectiveMode = (selectedType === "meaning" && meaningPipeline) ? "meaning" : "spelling";
+
+      // Compute vectors for all sentences including the new one
+      const vectors = await computeSentenceVectors(sentences, effectiveMode);
+      const customIndex = sentences.length - 1;
+      const customVector = vectors[customIndex];
+
+      // Redraw the chart with the new sentence as a bigger orange dot
+      const points3D = reduceTo3D(vectors);
+      render3DChart(sentences, points3D, customIndex);
+
+      // Show the first 8 numbers of its vector
+      const first8Values = customVector.slice(0, 8).map(function (num) {
+        return num.toFixed(3);
+      });
+      document.getElementById("custom-vector-preview").textContent = "[" + first8Values.join(", ") + ", ... ] (vector length: " + customVector.length + " dimensions)";
+
+      // 3. Find and list its 3 closest sentences in the existing plot
+      const similarities = [];
+      for (let i = 0; i < sentences.length - 1; i++) {
+        const sim = calculateCosineSimilarity(customVector, vectors[i]);
+        similarities.push({
+          sentence: sentences[i],
+          score: sim
+        });
+      }
+
+      similarities.sort(function (a, b) {
+        return b.score - a.score;
+      });
+
+      const top3 = similarities.slice(0, 3);
+      const customTableBody = document.getElementById("custom-closest-body");
+      customTableBody.innerHTML = "";
+
+      for (let i = 0; i < top3.length; i++) {
+        const row = document.createElement("tr");
+
+        const rankCell = document.createElement("td");
+        rankCell.textContent = "#" + (i + 1);
+
+        const sentCell = document.createElement("td");
+        sentCell.textContent = top3[i].sentence;
+
+        const scoreCell = document.createElement("td");
+        scoreCell.style.textAlign = "right";
+        const scoreBadge = document.createElement("span");
+        scoreBadge.className = "score-badge";
+        scoreBadge.textContent = top3[i].score.toFixed(3);
+        scoreCell.appendChild(scoreBadge);
+
+        row.appendChild(rankCell);
+        row.appendChild(sentCell);
+        row.appendChild(scoreCell);
+
+        customTableBody.appendChild(row);
+      }
+
+      // Also update the global closest pairs table
+      displayClosestPairs(sentences, vectors);
+
+      // Show the custom results container
+      document.getElementById("custom-results-container").style.display = "block";
     }
 
     // WHAT THIS DOES: Connects all button clicks, slider inputs, and window resize events when the page finishes loading.
@@ -1130,6 +1239,7 @@ Share prices fell sharply.</textarea>
       document.getElementById("btn-build-vocab").addEventListener("click", buildVocabulary);
       document.getElementById("btn-tokenize").addEventListener("click", tokenizeSentence);
       document.getElementById("btn-embed-plot").addEventListener("click", handleEmbedAndPlot);
+      document.getElementById("btn-custom-embed").addEventListener("click", handleCustomSentence);
 
       // Listen to live drag events on the vocabulary size slider
       const vocabSlider = document.getElementById("vocab-slider");
